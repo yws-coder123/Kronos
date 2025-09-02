@@ -27,20 +27,22 @@ class KronosTaskPredictor:
     封装模型加载和预测逻辑，支持GPU/CPU自动检测。
     """
     
-    def __init__(self, enable_plotting: bool = True):
+    def __init__(self, model_name: str = "Kronos-7B-base", enable_plotting: bool = True):
         """
         初始化预测器
         
         Args:
+            model_name: 模型名称，默认为 "Kronos-7B-base"
             enable_plotting: 是否启用生图功能，默认开启
         """
         self.enable_plotting = enable_plotting
         self.device = self._detect_device()
-        self.model = None
-        self.tokenizer = None
-        self.predictor = None
+        self.model_name = model_name
         
         print(f"使用设备: {self.device}")
+        
+        # 在初始化时就加载模型
+        self._load_model(model_name)
     
     def _detect_device(self) -> str:
         """检测GPU是否可用，设置模型使用CPU还是GPU"""
@@ -187,8 +189,11 @@ class KronosTaskPredictor:
             if task.historical_stock_data is None or len(task.historical_stock_data) == 0:
                 raise ValueError("没有历史数据")
             
-            # 加载模型
-            self._load_model(task.model_name)
+            # 如果任务指定的模型与当前加载的模型不同，重新加载
+            if task.model_name != self.model_name:
+                print(f"切换模型: {self.model_name} -> {task.model_name}")
+                self._load_model(task.model_name)
+                self.model_name = task.model_name
             
             # 准备数据 - 使用turnover字段作为amount
             x_df = task.historical_stock_data[['open', 'high', 'low', 'close', 'volume', 'turnover']].copy()
