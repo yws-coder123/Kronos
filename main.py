@@ -15,14 +15,17 @@ def main(i=0):
     stock_list = ['BTCUSDT']
     
     # 生成任务列表
-    tasks = generator.generate_from_stock_list(
-        stock_symbols=stock_list,
-        start_prediction_timestamp=datetime(2025, 8, 15, 12, 0, 0, 0) - timedelta(hours=i),
-        time_granularity=TimeGranularity.HOUR_1,
-        product_type=ProductType.CRYPTO,
-        input_length=500,
-        output_length=16,
-    )
+    tasks=[]
+    for i in range(0, 90, 1):
+        _tasks = generator.generate_from_stock_list(
+            stock_symbols=stock_list,
+            start_prediction_timestamp=datetime(2025, 8, 15, 12, 0, 0, 0) - timedelta(hours=i),
+            time_granularity=TimeGranularity.HOUR_1,
+            product_type=ProductType.CRYPTO,
+            input_length=32,
+            output_length=4,
+        )
+        tasks.extend(_tasks)
     
     # 打印生成的任务
     print(f"生成了 {len(tasks)} 个任务:")
@@ -30,8 +33,9 @@ def main(i=0):
         print(f"任务ID: {task.id}, 产品类型: {task.product_type}, 股票: {task.stock_symbol}, 时间粒度: {task.time_granularity}")
     
     # 获取股票数据
+    fetcher = ITickDataFetcher()
+    predictor = KronosTaskPredictor(enable_plotting=True)
     try:
-        fetcher = ITickDataFetcher()
         print("\n开始获取股票数据...")
         
         for task in tasks:
@@ -47,6 +51,22 @@ def main(i=0):
             if future_count != task.output_length:
                 print(f"  ⚠️ 警告: 未来数据条数({future_count})与输出长度({task.output_length})不一致")
 
+            # 测试预测模块
+            print("\n开始测试预测模块...")
+            if task.historical_stock_data is not None and len(task.historical_stock_data) > 0:
+                print(f"\n测试任务 {task.id}: {task.stock_symbol}")
+                success = predictor.predict_task(task)
+
+                if success:
+                    print(f"✅ 任务 {task.id} 预测成功")
+                    print(f"预测状态: {task.status}")
+                    if task.prediction_results is not None:
+                        print(f"预测结果条数: {len(task.prediction_results)}")
+                else:
+                    print(f"❌ 任务 {task.id} 预测失败")
+
+        else:
+            print("没有找到有效的历史数据，跳过预测测试")
 
 
     except Exception as e:
@@ -54,32 +74,10 @@ def main(i=0):
         print("请确保已设置ITICK_API_KEY环境变量")
         return tasks
     
-    # 测试预测模块
-    print("\n开始测试预测模块...")
-    predictor = KronosTaskPredictor(enable_plotting=True)
-    
-    # 只测试第一个有数据的任务
-    for task in tasks:
-        if task.historical_stock_data is not None and len(task.historical_stock_data) > 0:
-            print(f"\n测试任务 {task.id}: {task.stock_symbol}")
-            success = predictor.predict_task(task)
-            
-            if success:
-                print(f"✅ 任务 {task.id} 预测成功")
-                print(f"预测状态: {task.status}")
-                if task.prediction_results is not None:
-                    print(f"预测结果条数: {len(task.prediction_results)}")
-            else:
-                print(f"❌ 任务 {task.id} 预测失败")
-            
-            # 只测试一个任务
-            break
-    else:
-        print("没有找到有效的历史数据，跳过预测测试")
+
     
     return tasks
 
 
 if __name__ == "__main__":
-    for i in range(0, 90, 1):
-        main(i)
+    main()
