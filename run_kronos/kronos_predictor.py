@@ -131,8 +131,7 @@ class KronosTaskPredictor:
             fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 6), sharex=True)
             
             # 添加标题
-            product_type_str = task.product_type.value if hasattr(task.product_type, 'value') else str(task.product_type)
-            fig.suptitle(f'{task.stock_symbol} - {product_type_str}', fontsize=16, fontweight='bold')
+            fig.suptitle(f'{task.stock_symbol}', fontsize=16, fontweight='bold')
             
             # 绘制价格 - 使用时间戳作为 x 轴
             ax1.plot(sr_close.index, sr_close.values, label='Ground Truth', color='blue', linewidth=1.5)

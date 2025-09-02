@@ -19,9 +19,13 @@ load_dotenv()
 class ITickDataFetcher:
     """iTick数据获取器类"""
     
-    def __init__(self):
+    def __init__(self, enable_cache: bool = True, cache_multiplier: int = 4):
         """
         初始化数据获取器
+        
+        Args:
+            enable_cache: 是否启用缓存，默认True
+            cache_multiplier: 缓存倍数，默认4倍
         """
         # 检查API密钥
         api_key = os.getenv('ITICK_API_KEY')
@@ -31,6 +35,20 @@ class ITickDataFetcher:
         # 速率限制：根据iTick API限制调整
         self.rate_limit_delay = 1  # 调用间隔秒数
         self.last_call_time = 0
+        
+        # 缓存相关配置
+        self.enable_cache = enable_cache
+        self.cache_multiplier = cache_multiplier
+        
+        # 缓存存储：{cache_key: sorted_dataframe}
+        self._cache = {}
+        
+        # 缓存统计
+        self.cache_stats = {
+            'hits': 0,
+            'misses': 0,
+            'api_calls_saved': 0
+        }
         
         # 时间粒度映射到iTick k_type
         self.time_granularity_map = {
@@ -65,6 +83,110 @@ class ITickDataFetcher:
             time.sleep(sleep_time)
         
         self.last_call_time = time.time()
+    
+    def _generate_cache_key(self, symbol: str, product_type: ProductType, k_type: int) -> str:
+        """
+        生成缓存key
+        
+        Args:
+            symbol: 股票代码
+            product_type: 产品类型
+            k_type: 时间粒度类型
+            
+        Returns:
+            cache_key: 缓存键
+        """
+        return f"{symbol}_{product_type}_{k_type}"
+    
+    def _check_cache_coverage(self, cache_key: str, end_timestamp: datetime, limit: int) -> Tuple[bool, Optional[pd.DataFrame]]:
+        """
+        检查缓存是否能满足数据请求
+        
+        Args:
+            cache_key: 缓存键
+            end_timestamp: 结束时间戳
+            limit: 需要的数据条数
+            
+        Returns:
+            (is_covered, data): 是否覆盖和对应的数据
+        """
+        if not self.enable_cache or cache_key not in self._cache:
+            return False, None
+            
+        cached_df = self._cache[cache_key]
+        if cached_df.empty:
+            return False, None
+            
+        # 检查时间戳范围：需要找到end_timestamp之前的limit条数据
+        before_end = cached_df[cached_df['timestamp'] <= end_timestamp]
+        
+        if len(before_end) >= limit:
+            # 取最后limit条数据
+            result_data = before_end.tail(limit).copy()
+            self.cache_stats['hits'] += 1
+            self.cache_stats['api_calls_saved'] += 1
+            return True, result_data
+        else:
+            self.cache_stats['misses'] += 1
+            return False, None
+    
+    def _merge_cache_data(self, cache_key: str, new_data: pd.DataFrame):
+        """
+        将新数据合并到缓存中
+        
+        Args:
+            cache_key: 缓存键
+            new_data: 新的数据
+        """
+        if not self.enable_cache:
+            return
+            
+        if cache_key in self._cache:
+            if not new_data.empty:
+                # 合并数据并去重
+                combined_df = pd.concat([self._cache[cache_key], new_data], ignore_index=True)
+                # 按时间戳排序并去重
+                combined_df = combined_df.drop_duplicates(subset=['timestamp']).sort_values('timestamp').reset_index(drop=True)
+                self._cache[cache_key] = combined_df
+        else:
+            # 新缓存项（即使是空数据也要存储，表示已经请求过）
+            if new_data.empty:
+                self._cache[cache_key] = new_data.copy()
+            else:
+                self._cache[cache_key] = new_data.sort_values('timestamp').reset_index(drop=True)
+    
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """
+        获取缓存统计信息
+        
+        Returns:
+            缓存统计字典
+        """
+        total_requests = self.cache_stats['hits'] + self.cache_stats['misses']
+        hit_rate = (self.cache_stats['hits'] / total_requests * 100) if total_requests > 0 else 0
+        
+        return {
+            'enabled': self.enable_cache,
+            'cache_multiplier': self.cache_multiplier,
+            'total_cache_keys': len(self._cache),
+            'hits': self.cache_stats['hits'],
+            'misses': self.cache_stats['misses'],
+            'total_requests': total_requests,
+            'hit_rate_percent': round(hit_rate, 2),
+            'api_calls_saved': self.cache_stats['api_calls_saved']
+        }
+    
+    def clear_cache(self):
+        """
+        清空缓存
+        """
+        self._cache.clear()
+        self.cache_stats = {
+            'hits': 0,
+            'misses': 0,
+            'api_calls_saved': 0
+        }
+        print("缓存已清空")
     
     def _get_k_type(self, time_granularity: TimeGranularity) -> int:
         """
@@ -187,6 +309,7 @@ class ITickDataFetcher:
         try:
             # 计算结束时间戳和数据条数
             end_timestamp_ms, total_limit = self.calculate_end_timestamp_and_limit(task)
+            end_timestamp = datetime.fromtimestamp(end_timestamp_ms / 1000)
             
             # 获取k_type
             k_type = self._get_k_type(task.time_granularity)
@@ -197,40 +320,67 @@ class ITickDataFetcher:
             # 解析股票代码
             region, code = self._parse_symbol(task.stock_symbol, task.product_type)
             
+            # 生成缓存key
+            cache_key = self._generate_cache_key(task.stock_symbol, task.product_type, k_type)
+            
             print(f"获取股票数据: {task.stock_symbol}, 产品类型: {product_type_str}, 结束时间戳: {end_timestamp_ms}, 数据条数: {total_limit}, 粒度: {task.time_granularity}")
             
-            # 速率限制检查
-            self._rate_limit_check()
+            # 检查缓存
+            is_cached, cached_data = self._check_cache_coverage(cache_key, end_timestamp, total_limit)
             
-            # 调用iTick API获取数据
-            response = get_kline_data(
-                product_type=product_type_str,
-                region=region,
-                code=code,
-                k_type=k_type,
-                limit=total_limit,
-                et=str(end_timestamp_ms)
-            )
+            if is_cached:
+                print(f"缓存命中: 从缓存获取 {len(cached_data)} 条数据")
+                df = cached_data
+            else:
+                print(f"缓存未命中: 从API获取数据")
+                
+                # 计算实际获取的数据量（使用缓存倍数）
+                actual_limit = total_limit * self.cache_multiplier if self.enable_cache else total_limit
+                
+                # 速率限制检查
+                self._rate_limit_check()
+                
+                # 调用iTick API获取数据
+                response = get_kline_data(
+                    product_type=product_type_str,
+                    region=region,
+                    code=code,
+                    k_type=k_type,
+                    limit=actual_limit,
+                    et=str(end_timestamp_ms)
+                )
             
-            if response.get('code') != 0 or not response.get('data'):
-                print(f"警告：未获取到数据: {task.stock_symbol}, 响应码: {response.get('code')}, 消息: {response.get('msg', '未知错误')}")
-                return None, None
-            
-            # 转换为DataFrame
-            data_list = []
-            for item in response['data']:
-                data_list.append({
-                    'timestamp': datetime.fromtimestamp(item['t'] / 1000),
-                    'open': item['o'],
-                    'high': item['h'],
-                    'low': item['l'],
-                    'close': item['c'],
-                    'volume': item['v'],
-                    'turnover': item.get('tu', 0),  # 成交金额
-                })
-            
-            df = pd.DataFrame(data_list)
-            df = df.sort_values('timestamp').reset_index(drop=True)
+                if response.get('code') != 0 or not response.get('data'):
+                    print(f"警告：未获取到数据: {task.stock_symbol}, 响应码: {response.get('code')}, 消息: {response.get('msg', '未知错误')}")
+                    # 即使没有数据，也要在缓存中记录这次请求，避免重复API调用
+                    empty_df = pd.DataFrame(columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'turnover'])
+                    self._merge_cache_data(cache_key, empty_df)
+                    return None, None
+                
+                # 转换为DataFrame
+                data_list = []
+                for item in response['data']:
+                    data_list.append({
+                        'timestamp': datetime.fromtimestamp(item['t'] / 1000),
+                        'open': item['o'],
+                        'high': item['h'],
+                        'low': item['l'],
+                        'close': item['c'],
+                        'volume': item['v'],
+                        'turnover': item.get('tu', 0),  # 成交金额
+                    })
+                
+                full_df = pd.DataFrame(data_list)
+                full_df = full_df.sort_values('timestamp').reset_index(drop=True)
+                
+                # 更新缓存
+                self._merge_cache_data(cache_key, full_df)
+                
+                # 从完整数据中提取需要的部分
+                before_end = full_df[full_df['timestamp'] <= end_timestamp]
+                df = before_end.tail(total_limit).copy() if len(before_end) >= total_limit else full_df.copy()
+                
+                print(f"从API获取 {len(full_df)} 条数据，实际使用 {len(df)} 条数据")
             
             # 根据start_prediction_timestamp分割数据
             historical_data = df[df['timestamp'] <= task.start_prediction_timestamp].copy()
