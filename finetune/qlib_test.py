@@ -20,7 +20,7 @@ from qlib.utils import flatten_dict
 from qlib.utils.time import Freq
 
 # Ensure project root is in the Python path
-sys.path.append("../")
+sys.path.append("./")
 from config import Config
 from model.kronos import Kronos, KronosTokenizer, auto_regressive_inference
 
@@ -257,7 +257,7 @@ def generate_predictions(config: dict, test_data: dict) -> dict[str, pd.DataFram
         dataset,
         batch_size=config['batch_size'] // config['sample_count'],
         shuffle=False,
-        num_workers=os.cpu_count() // 2,
+        num_workers=0,  # Disable multiprocessing for Windows compatibility
         collate_fn=collate_fn_for_inference
     )
 
@@ -312,8 +312,8 @@ def main():
         'data_path': base_config.dataset_path,
         'result_save_path': base_config.backtest_result_path,
         'result_name': base_config.backtest_save_folder_name,
-        'tokenizer_path': base_config.finetuned_tokenizer_path,
-        'model_path': base_config.finetuned_predictor_path,
+        'tokenizer_path': base_config.pretrained_tokenizer_path,
+        'model_path': base_config.pretrained_predictor_path,
         'max_context': base_config.max_context,
         'pred_len': base_config.predict_window,
         'clip': base_config.clip,

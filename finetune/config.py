@@ -9,8 +9,8 @@ class Config:
         # =================================================================
         # Data & Feature Parameters
         # =================================================================
-        # TODO: Update this path to your Qlib data directory.
-        self.qlib_data_path = "~/.qlib/qlib_data/cn_data"
+        # Updated path to your Qlib data directory.
+        self.qlib_data_path = "./.qlib/qlib_data/cn_data"
         self.instrument = 'csi300'
 
         # Overall time range for data loading from Qlib.
@@ -34,8 +34,8 @@ class Config:
         # to account for the `lookback_window`.
         self.train_time_range = ["2011-01-01", "2022-12-31"]
         self.val_time_range = ["2022-09-01", "2024-06-30"]
-        self.test_time_range = ["2024-04-01", "2025-06-05"]
-        self.backtest_time_range = ["2024-07-01", "2025-06-05"]
+        self.test_time_range = ["2025-01-01", "2025-07-01"]
+        self.backtest_time_range = ["2025-01-01", "2025-07-01"]
 
         # TODO: Directory to save the processed, pickled datasets.
         self.dataset_path = "./data/processed_datasets"
@@ -72,7 +72,7 @@ class Config:
         # =================================================================
         # Experiment Logging & Saving
         # =================================================================
-        self.use_comet = True # Set to False if you don't want to use Comet ML
+        self.use_comet = False # Set to False if you don't want to use Comet ML
         self.comet_config = {
             # It is highly recommended to load secrets from environment variables
             # for security purposes. Example: os.getenv("COMET_API_KEY")
@@ -96,10 +96,9 @@ class Config:
         # =================================================================
         # Model & Checkpoint Paths
         # =================================================================
-        # TODO: Update these paths to your pretrained model locations.
-        # These can be local paths or Hugging Face Hub model identifiers.
-        self.pretrained_tokenizer_path = "path/to/your/Kronos-Tokenizer-base"
-        self.pretrained_predictor_path = "path/to/your/Kronos-small"
+        # Using Hugging Face Hub model identifiers for pre-trained models
+        self.pretrained_tokenizer_path = "NeoQuasar/Kronos-Tokenizer-base"
+        self.pretrained_predictor_path = "NeoQuasar/Kronos-base"
 
         # Paths to the fine-tuned models, derived from the save_path.
         # These will be generated automatically during training.
